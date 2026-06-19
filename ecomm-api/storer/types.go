@@ -25,7 +25,8 @@ type Order struct {
 	ShippingPrice float64    `db:"shipping_price" json:"shipping_price"`
 	TotalPrice    float64    `db:"total_price" json:"total_price"`
 	CreatedAt     *time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt     *time.Time `db:"updated_at" json:"updated_at"`
+	UpdatedAt     *time.Time  `db:"updated_at" json:"updated_at"`
+	Items         []OrderItem `db:"-" json:"items"`
 }
 
 // OrderItem represents an order item in the database.

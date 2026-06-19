@@ -210,3 +210,160 @@ func TestDeleteProduct_Error(t *testing.T) {
 	assert.Equal(t, "db error", err.Error())
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestCreateOrder_Success(t *testing.T) {
+	s, mock := setupMockDB(t)
+	defer s.db.Close()
+
+	o := &Order{
+		PaymentMethod: "Credit Card",
+		TaxPrice:      10.0,
+		ShippingPrice: 5.0,
+		TotalPrice:    115.0,
+	}
+	items := []OrderItem{
+		{ProductID: 1, Name: "Phone", Quantity: 1, Price: 100},
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO orders").
+		WithArgs(o.PaymentMethod, o.TaxPrice, o.ShippingPrice, o.TotalPrice, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	mock.ExpectExec("INSERT INTO order_items").
+		WithArgs(1, items[0].ProductID, items[0].Name, items[0].Quantity, items[0].Image, items[0].Price).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	mock.ExpectCommit()
+
+	id, err := s.CreateOrder(context.Background(), o, items)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 1, id)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestCreateOrder_TxRollback(t *testing.T) {
+	s, mock := setupMockDB(t)
+	defer s.db.Close()
+
+	o := &Order{}
+	items := []OrderItem{{ProductID: 1}}
+
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO orders").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	
+	mock.ExpectExec("INSERT INTO order_items").
+		WillReturnError(errors.New("insert item failed"))
+
+	mock.ExpectRollback()
+
+	id, err := s.CreateOrder(context.Background(), o, items)
+
+	assert.Error(t, err)
+	assert.Equal(t, 0, id)
+	assert.Contains(t, err.Error(), "insert item failed")
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGetOrderByID_Success(t *testing.T) {
+	s, mock := setupMockDB(t)
+	defer s.db.Close()
+
+	now := time.Now()
+	rows := sqlmock.NewRows([]string{"id", "payment_method", "tax_price", "shipping_price", "total_price", "created_at", "updated_at"}).
+		AddRow(1, "Credit Card", 10.0, 5.0, 115.0, now, now)
+
+	mock.ExpectQuery("SELECT \\* FROM orders WHERE id = \\?").
+		WithArgs(1).
+		WillReturnRows(rows)
+
+	o, err := s.GetOrderByID(context.Background(), 1)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, o)
+	assert.Equal(t, 1, o.ID)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGetOrderItemsByOrderID_Success(t *testing.T) {
+	s, mock := setupMockDB(t)
+	defer s.db.Close()
+
+	rows := sqlmock.NewRows([]string{"id", "order_id", "product_id", "name", "quantity", "image", "price"}).
+		AddRow(1, 1, 1, "Phone", 1, "img.png", 100)
+
+	mock.ExpectQuery("SELECT \\* FROM order_items WHERE order_id = \\?").
+		WithArgs(1).
+		WillReturnRows(rows)
+
+	items, err := s.GetOrderItemsByOrderID(context.Background(), 1)
+
+	assert.NoError(t, err)
+	assert.Len(t, items, 1)
+	assert.Equal(t, "Phone", items[0].Name)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestListOrders_Success(t *testing.T) {
+	s, mock := setupMockDB(t)
+	defer s.db.Close()
+
+	now := time.Now()
+	rows := sqlmock.NewRows([]string{"id", "payment_method", "tax_price", "shipping_price", "total_price", "created_at", "updated_at"}).
+		AddRow(2, "Cash", 0.0, 0.0, 50.0, now, now).
+		AddRow(1, "Credit Card", 10.0, 5.0, 115.0, now, now)
+
+	mock.ExpectQuery("SELECT \\* FROM orders ORDER BY id DESC").
+		WillReturnRows(rows)
+
+	orders, err := s.ListOrders(context.Background())
+
+	assert.NoError(t, err)
+	assert.Len(t, orders, 2)
+	assert.Equal(t, 2, orders[0].ID)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUpdateOrder_Success(t *testing.T) {
+	s, mock := setupMockDB(t)
+	defer s.db.Close()
+
+	o := &Order{
+		ID:            1,
+		PaymentMethod: "Transfer",
+		TaxPrice:      0,
+		ShippingPrice: 0,
+		TotalPrice:    100,
+	}
+
+	mock.ExpectExec("UPDATE orders SET").
+		WithArgs(o.PaymentMethod, o.TaxPrice, o.ShippingPrice, o.TotalPrice, sqlmock.AnyArg(), o.ID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := s.UpdateOrder(context.Background(), o)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, o.UpdatedAt)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestDeleteOrder_Success(t *testing.T) {
+	s, mock := setupMockDB(t)
+	defer s.db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectExec("DELETE FROM order_items WHERE order_id = \\?").
+		WithArgs(1).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("DELETE FROM orders WHERE id = \\?").
+		WithArgs(1).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	err := s.DeleteOrder(context.Background(), 1)
+
+	assert.NoError(t, err)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
