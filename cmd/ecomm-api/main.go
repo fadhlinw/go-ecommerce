@@ -2,32 +2,30 @@ package main
 
 import (
 	"log"
+	"net/http"
 
-	"github.com/fadhlinw/go-ecommerce/db"
-	"github.com/fadhlinw/go-ecommerce/ecomm-api/storer"
-	"github.com/joho/godotenv"
+	"github.com/fadhlinw/go-ecommerce/ecomm-api/handler"
+	pb "github.com/fadhlinw/go-ecommerce/ecomm-grpc/pb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
-	// Load environment variables from .env file
-	if err := godotenv.Load(); err != nil {
-		log.Println("Warning: No .env file found or error loading it")
-	}
-
-	// Initialize the database connection.
-	dbConn, err := db.NewDatabase()
+	// Connect to gRPC server
+	conn, err := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		log.Fatalf("did not connect: %v", err)
 	}
-	// Ensure the connection is safely closed when the application shuts down
-	defer dbConn.Close()
+	defer conn.Close()
 
-	log.Println("Database connection initialized successfully!")
-	
-	// Inject the raw sqlx database connection into our Storer.
-	// This storer is now ready to be used by your application's logic or HTTP handlers.
-	appStorer := storer.NewStorer(dbConn.GetDB())
-	_ = appStorer // Placeholder to prevent "unused variable" error.
-	
-	log.Println("Storer initialized successfully! API is ready to serve.")
+	ecommClient := pb.NewEcommServiceClient(conn)
+	apiHandler := handler.NewHandler(ecommClient)
+
+	// Setup Routes
+	r := handler.SetupRoutes(apiHandler)
+
+	log.Println("REST API Server is running on port 8080")
+	if err := http.ListenAndServe(":8080", r); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
 }
